@@ -17,7 +17,7 @@ on:
   workflow_call:
     secrets:
       CODECOV_TOKEN:
-        required: true
+        required: false
 
 jobs:
   build:
@@ -34,8 +34,19 @@ jobs:
         with:
           go-version: ${{ matrix.go-version }}
           check-latest: true
+      - name: Verify module graph and vet
+        run: |
+          go mod download
+          go mod verify
+          go mod tidy
+          git diff --exit-code -- go.mod go.sum
+          go vet ./...
       - name: Run unit tests
         run: make test
+      - name: Scan the library and its tests
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@v1.8.0
+          govulncheck -test -show verbose ./...
       - name: Upload coverage to codecov.io
         if: github.repository_owner == 'notaryproject'
         uses: codecov/codecov-action@v5
