@@ -1,0 +1,90 @@
+# Copyright The Notary Project Authors.
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+name: Fork library trial draft
+
+on:
+  push:
+    tags:
+      - 'v*-trial.*'
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  qualify:
+    if: (github.repository == 'yizha1/notation-core-go' || github.repository == 'yizha1/notation-go') && vars.PATCH_TRIAL_ENABLED == 'true'
+    runs-on: ubuntu-24.04
+    strategy:
+      matrix:
+        go-version: ['1.26', 'stable']
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version: ${{ matrix.go-version }}
+          check-latest: true
+      - name: Verify, vet, and test the library
+        run: |
+          go version
+          go mod download
+          go mod verify
+          go mod tidy
+          git diff --exit-code -- go.mod go.sum
+          go vet ./...
+          make test
+      - name: Scan the library and its tests
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@v1.8.0
+          govulncheck -test -show verbose ./...
+  draft:
+    needs: qualify
+    if: (github.repository == 'yizha1/notation-core-go' || github.repository == 'yizha1/notation-go') && vars.PATCH_TRIAL_ENABLED == 'true' && needs.qualify.result == 'success'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Verify signed trial tag and create an unpublished source draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          [[ "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-trial\.[1-9][0-9]*$ ]]
+          git cat-file -t "$GITHUB_REF_NAME" | grep -x tag
+          tag_object=$(git rev-parse "$GITHUB_REF_NAME")
+          gh api "repos/$GITHUB_REPOSITORY/git/tags/$tag_object" \
+            --jq '.verification.verified' | grep -x true
+          name="${GITHUB_REPOSITORY#*/}"
+          git archive --format=tar.gz --prefix="$name-$GITHUB_REF_NAME/" \
+            --output="$name-source.tar.gz" "$GITHUB_SHA"
+          sha256sum "$name-source.tar.gz" > checksums.txt
+          {
+            echo 'Trial only; not an official Notary Project release.'
+            echo
+            echo "Tested commit: $GITHUB_SHA"
+            echo 'Minimum Go requirement: 1.26; validated with patched 1.26 and stable.'
+            echo 'This draft must remain unpublished. The trial tag is a public module ref.'
+            echo
+            cat go.mod
+          } > trial-notes.txt
+          gh release create "$GITHUB_REF_NAME" "$name-source.tar.gz" checksums.txt \
+            --repo "$GITHUB_REPOSITORY" --verify-tag --draft --prerelease \
+            --title "TRIAL ONLY: $name $GITHUB_REF_NAME" --notes-file trial-notes.txt
+          gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" \
+            --json isDraft,isPrerelease --jq '.isDraft and .isPrerelease' | grep -x true

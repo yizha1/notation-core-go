@@ -15,20 +15,34 @@ package signature
 
 import (
 	"reflect"
-	"sync"
 	"testing"
 )
 
 var (
-	emptyFuncs sync.Map
-	validFuncs sync.Map
+	emptyFuncs = map[string]envelopeFunc{}
+	validFuncs = map[string]envelopeFunc{
+		testMediaType: {
+			newFunc:   testNewFunc,
+			parseFunc: testParseFunc,
+		},
+	}
 )
 
-func init() {
-	validFuncs.Store(testMediaType, envelopeFunc{
-		newFunc: testNewFunc,
-		parseFunc: testParseFunc,
+func setEnvelopeFuncs(t *testing.T, funcs map[string]envelopeFunc) {
+	t.Helper()
+	original := make(map[string]envelopeFunc)
+	envelopeFuncs.Range(func(key, value any) bool {
+		original[key.(string)] = value.(envelopeFunc)
+		return true
 	})
+	restore := func(values map[string]envelopeFunc) {
+		envelopeFuncs.Clear()
+		for key, value := range values {
+			envelopeFuncs.Store(key, value)
+		}
+	}
+	restore(funcs)
+	t.Cleanup(func() { restore(original) })
 }
 
 // mock an envelope that implements signature.Envelope.
@@ -104,7 +118,7 @@ func TestRegisterEnvelopeType(t *testing.T) {
 func TestRegisteredEnvelopeTypes(t *testing.T) {
 	tests := []struct {
 		name          string
-		envelopeFuncs sync.Map
+		envelopeFuncs map[string]envelopeFunc
 		expect        []string
 	}{
 		{
@@ -113,15 +127,15 @@ func TestRegisteredEnvelopeTypes(t *testing.T) {
 			expect:        nil,
 		},
 		{
-			name: "nonempty map",
+			name:          "nonempty map",
 			envelopeFuncs: validFuncs,
-			expect: []string{testMediaType},
+			expect:        []string{testMediaType},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			envelopeFuncs = tt.envelopeFuncs
+			setEnvelopeFuncs(t, tt.envelopeFuncs)
 			types := RegisteredEnvelopeTypes()
 
 			if !reflect.DeepEqual(types, tt.expect) {
@@ -135,7 +149,7 @@ func TestNewEnvelope(t *testing.T) {
 	tests := []struct {
 		name          string
 		mediaType     string
-		envelopeFuncs sync.Map
+		envelopeFuncs map[string]envelopeFunc
 		expect        Envelope
 		expectErr     bool
 	}{
@@ -147,17 +161,17 @@ func TestNewEnvelope(t *testing.T) {
 			expectErr:     true,
 		},
 		{
-			name:      "valid media type",
-			mediaType: testMediaType,
+			name:          "valid media type",
+			mediaType:     testMediaType,
 			envelopeFuncs: validFuncs,
-			expect:    testEnvelope{},
-			expectErr: false,
+			expect:        testEnvelope{},
+			expectErr:     false,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			envelopeFuncs = tt.envelopeFuncs
+			setEnvelopeFuncs(t, tt.envelopeFuncs)
 			envelope, err := NewEnvelope(tt.mediaType)
 
 			if (err != nil) != tt.expectErr {
@@ -174,7 +188,7 @@ func TestParseEnvelope(t *testing.T) {
 	tests := []struct {
 		name          string
 		mediaType     string
-		envelopeFuncs sync.Map
+		envelopeFuncs map[string]envelopeFunc
 		expect        Envelope
 		expectErr     bool
 	}{
@@ -186,17 +200,17 @@ func TestParseEnvelope(t *testing.T) {
 			expectErr:     true,
 		},
 		{
-			name:      "valid media type",
-			mediaType: testMediaType,
+			name:          "valid media type",
+			mediaType:     testMediaType,
 			envelopeFuncs: validFuncs,
-			expect:    testEnvelope{},
-			expectErr: false,
+			expect:        testEnvelope{},
+			expectErr:     false,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			envelopeFuncs = tt.envelopeFuncs
+			setEnvelopeFuncs(t, tt.envelopeFuncs)
 			envelope, err := ParseEnvelope(tt.mediaType, nil)
 
 			if (err != nil) != tt.expectErr {
