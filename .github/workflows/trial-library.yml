@@ -59,17 +59,36 @@ jobs:
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
+          # Preserve the annotated tag by checking out its commit.
+          ref: ${{ github.sha }}
           persist-credentials: false
           fetch-depth: 0
       - name: Verify signed trial tag and create an unpublished source draft
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          [[ "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-trial\.[1-9][0-9]*$ ]]
-          git cat-file -t "$GITHUB_REF_NAME" | grep -x tag
-          tag_object=$(git rev-parse "$GITHUB_REF_NAME")
-          gh api "repos/$GITHUB_REPOSITORY/git/tags/$tag_object" \
-            --jq '.verification.verified' | grep -x true
+          if [[ ! "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-trial\.[1-9][0-9]*$ ]]; then
+            echo "::error::Invalid trial tag: $GITHUB_REF_NAME"
+            exit 1
+          fi
+          tag_ref="refs/tags/$GITHUB_REF_NAME"
+          tag_type=$(git cat-file -t "$tag_ref")
+          if [[ "$tag_type" != tag ]]; then
+            echo "::error::Expected an annotated tag at $tag_ref; found $tag_type"
+            exit 1
+          fi
+          tag_commit=$(git rev-parse "$tag_ref^{commit}")
+          if [[ "$tag_commit" != "$GITHUB_SHA" ]]; then
+            echo "::error::Trial tag commit $tag_commit differs from tested commit $GITHUB_SHA"
+            exit 1
+          fi
+          tag_object=$(git rev-parse "$tag_ref")
+          verified=$(gh api "repos/$GITHUB_REPOSITORY/git/tags/$tag_object" \
+            --jq '.verification.verified')
+          if [[ "$verified" != true ]]; then
+            echo "::error::GitHub has not verified the signature of $GITHUB_REF_NAME"
+            exit 1
+          fi
           name="${GITHUB_REPOSITORY#*/}"
           git archive --format=tar.gz --prefix="$name-$GITHUB_REF_NAME/" \
             --output="$name-source.tar.gz" "$GITHUB_SHA"
