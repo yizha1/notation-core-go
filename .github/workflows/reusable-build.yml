@@ -34,4 +34,5 @@ jobs:
       - name: Run unit tests
         run: make test
       - name: Upload coverage to codecov.io
+        if: github.repository_owner == 'notaryproject'
         uses: codecov/codecov-action@v4
