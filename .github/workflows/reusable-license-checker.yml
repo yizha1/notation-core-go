@@ -21,7 +21,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
       - name: Check license header
         uses: apache/skywalking-eyes/header@a196742f472feaffafea537ce5a2a4c3c53a8de4
 
